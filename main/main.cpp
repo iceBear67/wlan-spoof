@@ -7,7 +7,7 @@
 
 #include "mac_ring.h"
 
-#define POST_NOTIFY_URL "https://gotify/message?token=..."
+#define POST_NOTIFY_URL "..."
 #define WIFI_MAX_WAIT 6
 #define MIN_RSSI_REQUIREMENT (-66)
 
@@ -45,7 +45,7 @@ void initAP() {
 }
 
 void postAddressToServer() {
-    WiFi.begin();
+    WiFi.begin(TARGET_SSID);
     NetworkClientSecure wifiClient;
     uint8_t retries = 0;
     do {
