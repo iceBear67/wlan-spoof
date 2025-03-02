@@ -7,20 +7,25 @@
 
 #include "mac_ring.h"
 
-#define POST_NOTIFY_URL "..."
+#ifndef POST_NOTIFY_URL
+    #define POST_NOTIFY_URL "https://ip.sb"
+#endif
+#ifndef _SSID
+    #define _SSID "ESP32"
+#endif
 #define WIFI_MAX_WAIT 6
 #define MIN_RSSI_REQUIREMENT (-66)
+#define AUTOSAVE_INTERVAL (60)
 
 const uint32_t SCAN_THRESHOLD_MILLIS = 10 * 60 * 1000; // 10 minutes
 const uint32_t SCAN_SINCE_LAST_STA_CONNECT = 5 * 60 * 1000; // 5 minutes
-const char *TARGET_SSID = "...";
+const char *TARGET_SSID = _SSID;
 const int LED_PIN = 2;
 
 static uint64_t nextScan;
 static uint64_t lastSTAConnect;
+static uint64_t lastSave;
 static UniqueMacRing mac_ring;
-
-Preferences prefs;
 
 void onWifiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
     lastSTAConnect = millis();
@@ -29,6 +34,7 @@ void onWifiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
     mac_ring.push(addr);
     auto str = macToString(addr.addr);
     log_i("New device connected: %s", str.c_str());
+    digitalWrite(LED_PIN, HIGH);
 }
 
 void initAP() {
@@ -77,6 +83,7 @@ void postAddressToServer() {
 void checkAvailablity() {
     for (MacAddress *mac = nullptr; mac_ring.hasNext(); mac = mac_ring.pop()) {
         if (mac == nullptr) continue;
+        if(!isMacValid(mac->addr)) continue;
         log_i("Setting address to %s", macToString(mac->addr).c_str());
         esp_err_t err =
                 ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mac(WIFI_IF_STA, mac->addr));
@@ -125,6 +132,12 @@ void scanNearbyNetworks() {
         digitalWrite(LED_PIN,LOW);
     }else {
         Serial.println("No target signal! Try at next round.");
+        for (int i = 0; i < 6; ++i) {
+            digitalWrite(LED_PIN, HIGH);
+            delay(500);
+            digitalWrite(LED_PIN, LOW);
+            delay(500);
+        }
     }
     nextScan = millis() + SCAN_THRESHOLD_MILLIS;
     initAP();
@@ -135,17 +148,37 @@ void setup() {
     Serial.begin(115200);
     log_i("Initializing wlan-spoof");
     pinMode(LED_PIN, OUTPUT);
+    pinMode(BOOT_PIN, INPUT_PULLUP);
     log_i("Initializing WiFi AP");
     WiFi.onEvent(onWifiEvent, ARDUINO_EVENT_WIFI_AP_STACONNECTED);
     initAP();
     nextScan = millis() + SCAN_THRESHOLD_MILLIS;
     lastSTAConnect = millis();
+    lastSave = millis();
     log_i("wlan-spoof is successfully initialized!");
 }
 
 void loop() {
     if (millis() > nextScan && millis() > lastSTAConnect + SCAN_SINCE_LAST_STA_CONNECT) {
       scanNearbyNetworks();
+    }
+    if(millis() > lastSave + AUTOSAVE_INTERVAL * 1000) {
+        log_i("Saving recorded mac addresses.");
+        digitalWrite(LED_PIN, LOW);
+        lastSave = millis();
+        {
+            Preferences prefs;
+            if(!prefs.begin("wlan-spoof")) {
+                log_e("Cannot initialize wlan-spoof pref storage. autosave failed.");
+                lastSave = UINT64_MAX;
+            }else {
+                mac_ring.dump(&prefs);
+            }
+            prefs.end();
+        }
+        if(digitalRead(BOOT_PIN) == LOW) {
+            mac_ring.dumpToSerial();
+        }
     }
     delay(50);
 }

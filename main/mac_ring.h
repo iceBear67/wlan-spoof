@@ -6,7 +6,6 @@
 #define MACRING_H
 #include <cstdint>
 #include <cstring>
-#include <cstdio>
 
 #define MAC_ADDRESS_RING_SIZE 512
 
@@ -67,6 +66,25 @@ class UniqueMacRing {
 
     MacAddress* pop() {
         return &addressRing[current++ % (MAC_ADDRESS_RING_SIZE )];
+    }
+
+    void dump(Preferences *pref) {
+        pref->putBytes("mac_dump", &macRingSize, sizeof(macRingSize));
+    }
+
+    void load(Preferences *pref) {
+        pref->getBytes("mac_dump", &macRingSize, sizeof(macRingSize));
+    }
+
+    void dumpToSerial() {
+        for (int i = 0; i < MAC_ADDRESS_RING_SIZE; ++i) {
+            auto mac = addressRing[i].addr;
+            if(mac[0] == 0 && mac[1] == 0 && mac[2] == 0 && mac[3] == 0 && mac[4] == 0) continue;
+            char addr[18];
+            sprintf(addr, "%02X:%02X:%02X:%02X:%02X:%02X",
+                    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+            Serial.println(addr);
+        }
     }
 };
 #endif
