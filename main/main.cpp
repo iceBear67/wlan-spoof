@@ -97,14 +97,18 @@ void checkAvailablity() {
             continue;
         }
         postAddressToServer();
-        sleep(3);
+        for (int i = 0; i < 5; ++i) {
+            delay(500);
+            digitalWrite(LED_PIN, LOW);
+            delay(500);
+            digitalWrite(LED_PIN, HIGH);
+        }
     }
 }
 
 bool isAPSignalEnough() {
     // make sure we're in sta mode.
     if ((WiFiClass::getMode() & WIFI_MODE_STA) == 0) {
-        WiFi.softAPdisconnect();
         WiFiClass::mode(WIFI_MODE_STA);
     }
 
@@ -130,6 +134,7 @@ bool isAPSignalEnough() {
 
 void scanNearbyNetworks() {
     log_i("Scanning nearby networks");
+    WiFi.softAPdisconnect();
     bool can_start = isAPSignalEnough();
     if (can_start) {
         digitalWrite(LED_PIN,HIGH);
@@ -193,7 +198,6 @@ void loop() {
                 lastSave = UINT64_MAX;
             } else {
                 macRing.dump(&prefs);
-                //mac_ring.dumpToSerial();
             }
             prefs.end();
         }
