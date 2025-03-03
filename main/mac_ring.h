@@ -20,7 +20,7 @@ class UniqueMacRing {
 public:
     bool push(MacAddress address) {
 #ifdef FILTER_RANDOM_MAC
-        if(isRandomMac()) {
+        if(isRandomMac(address.addr)) {
             return false;
         }
 #endif
