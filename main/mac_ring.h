@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <cstring>
 
-#define MAC_ADDRESS_RING_SIZE 512
+#define MAC_ADDRESS_RING_SIZE 682 // 682 * 6 == 4092, 1 page in flash.
 
 typedef struct {
     uint8_t addr[6];
@@ -20,7 +20,7 @@ typedef struct {
 class BloomFilter {
     uint8_t filter[BYTE_SIZE]{};
 
-    size_t hash(const uint8_t mac[6]) const {
+    static size_t hash(const uint8_t mac[6]) {
         return (mac[5] * 31 + mac[4] * 29 + mac[3] * 23 + mac[2] * 19 + mac[1] * 17 + mac[0] * 13) % BLOOM_FILTER_SIZE;
     }
 
@@ -28,7 +28,7 @@ class BloomFilter {
         filter[index / 8] |= (1 << (index % 8));
     }
 
-    bool checkBit(size_t index) const {
+    [[nodiscard]] bool checkBit(size_t index) const {
         return filter[index / 8] & (1 << (index % 8));
     }
 
@@ -51,13 +51,17 @@ class UniqueMacRing {
     int macRingSize = 0;
     MacAddress addressRing[MAC_ADDRESS_RING_SIZE] = {};
     BloomFilter bloom_filter = {};
+    bool dirty = false;
   public:
-    void push(MacAddress address) {
+    bool push(MacAddress address) {
         if(!bloom_filter.contains(address.addr)) {
             addressRing[macRingSize % MAC_ADDRESS_RING_SIZE] = address;
             macRingSize++;
             bloom_filter.insert(address.addr);
+            dirty = true;
+            return true;
         }
+        return false;
     }
 
     [[nodiscard]] bool hasNext() const {
@@ -69,22 +73,30 @@ class UniqueMacRing {
     }
 
     void dump(Preferences *pref) {
-        pref->putBytes("mac_dump", &macRingSize, sizeof(macRingSize));
+        if(dirty) {
+            dirty = false;
+            pref->putBytes("mac_dump", &addressRing, sizeof(addressRing));
+        }
     }
 
     void load(Preferences *pref) {
-        pref->getBytes("mac_dump", &macRingSize, sizeof(macRingSize));
+        // counter wouldn't get updated. These data are for debugging purpose only, they
+        // are equal to trash in memory.
+        pref->getBytes("mac_dump", &addressRing, sizeof(addressRing));
     }
 
     void dumpToSerial() {
-        for (int i = 0; i < MAC_ADDRESS_RING_SIZE; ++i) {
-            auto mac = addressRing[i].addr;
+        int count=0;
+        for (auto & i : addressRing) {
+            auto mac = i.addr;
             if(mac[0] == 0 && mac[1] == 0 && mac[2] == 0 && mac[3] == 0 && mac[4] == 0) continue;
+            count++;
             char addr[18];
             sprintf(addr, "%02X:%02X:%02X:%02X:%02X:%02X",
                     mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
             Serial.println(addr);
         }
+        log_i("%d known addresses in total.", count);
     }
 };
 #endif

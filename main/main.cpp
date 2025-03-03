@@ -2,20 +2,19 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <Preferences.h>
-#include <WiFiAP.h>
 #include <util.h>
 
 #include "mac_ring.h"
 
 #ifndef POST_NOTIFY_URL
-    #define POST_NOTIFY_URL "https://ip.sb"
+#define POST_NOTIFY_URL "https://ip.sb"
 #endif
 #ifndef _SSID
-    #define _SSID "ESP32"
+#define _SSID "ESP32"
 #endif
 #define WIFI_MAX_WAIT 6
 #define MIN_RSSI_REQUIREMENT (-66)
-#define AUTOSAVE_INTERVAL (60)
+#define AUTOSAVE_INTERVAL (120)
 
 const uint32_t SCAN_THRESHOLD_MILLIS = 10 * 60 * 1000; // 10 minutes
 const uint32_t SCAN_SINCE_LAST_STA_CONNECT = 5 * 60 * 1000; // 5 minutes
@@ -25,16 +24,20 @@ const int LED_PIN = 2;
 static uint64_t nextScan;
 static uint64_t lastSTAConnect;
 static uint64_t lastSave;
+static bool isButtonHold;
 static UniqueMacRing mac_ring;
 
 void onWifiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
     lastSTAConnect = millis();
     MacAddress addr;
     memcpy(addr.addr, info.wifi_ap_staconnected.mac, 6);
-    mac_ring.push(addr);
-    auto str = macToString(addr.addr);
-    log_i("New device connected: %s", str.c_str());
-    digitalWrite(LED_PIN, HIGH);
+    if(mac_ring.push(addr)) {
+        auto str = macToString(addr.addr);
+        log_i("New device connected: %s", str.c_str());
+        digitalWrite(LED_PIN, HIGH);
+    }
+    // we have only 4 maximum connections in total.
+    esp_wifi_deauth_sta(info.wifi_ap_staconnected.aid);
 }
 
 void initAP() {
@@ -83,7 +86,7 @@ void postAddressToServer() {
 void checkAvailablity() {
     for (MacAddress *mac = nullptr; mac_ring.hasNext(); mac = mac_ring.pop()) {
         if (mac == nullptr) continue;
-        if(!isMacValid(mac->addr)) continue;
+        if (!isMacValid(mac->addr)) continue;
         log_i("Setting address to %s", macToString(mac->addr).c_str());
         esp_err_t err =
                 ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mac(WIFI_IF_STA, mac->addr));
@@ -98,7 +101,7 @@ void checkAvailablity() {
 
 bool isAPSignalEnough() {
     // make sure we're in sta mode.
-    if((WiFiClass::getMode() & WIFI_MODE_STA) == 0) {
+    if ((WiFiClass::getMode() & WIFI_MODE_STA) == 0) {
         WiFi.softAPdisconnect();
         WiFiClass::mode(WIFI_MODE_STA);
     }
@@ -130,7 +133,7 @@ void scanNearbyNetworks() {
         digitalWrite(LED_PIN,HIGH);
         checkAvailablity();
         digitalWrite(LED_PIN,LOW);
-    }else {
+    } else {
         Serial.println("No target signal! Try at next round.");
         for (int i = 0; i < 6; ++i) {
             digitalWrite(LED_PIN, HIGH);
@@ -155,30 +158,45 @@ void setup() {
     nextScan = millis() + SCAN_THRESHOLD_MILLIS;
     lastSTAConnect = millis();
     lastSave = millis();
+    isButtonHold = false;
+    Preferences prefs;
+    if (prefs.begin("wlan-spoof")) {
+        if(prefs.isKey("mac_dump")) {
+            log_i("Dumping last stored results:");
+            mac_ring.load(&prefs);
+            mac_ring.dumpToSerial();
+        }
+        prefs.end();
+    }
     log_i("wlan-spoof is successfully initialized!");
 }
 
 void loop() {
     if (millis() > nextScan && millis() > lastSTAConnect + SCAN_SINCE_LAST_STA_CONNECT) {
-      scanNearbyNetworks();
+        scanNearbyNetworks();
     }
-    if(millis() > lastSave + AUTOSAVE_INTERVAL * 1000) {
+    if (millis() > lastSave + AUTOSAVE_INTERVAL * 1000) {
         log_i("Saving recorded mac addresses.");
         digitalWrite(LED_PIN, LOW);
-        lastSave = millis();
-        {
+        lastSave = millis(); {
             Preferences prefs;
-            if(!prefs.begin("wlan-spoof")) {
+            if (!prefs.begin("wlan-spoof")) {
                 log_e("Cannot initialize wlan-spoof pref storage. autosave failed.");
                 lastSave = UINT64_MAX;
-            }else {
+            } else {
                 mac_ring.dump(&prefs);
+                mac_ring.dumpToSerial();
             }
             prefs.end();
         }
-        if(digitalRead(BOOT_PIN) == LOW) {
+    }
+    if (digitalRead(BOOT_PIN) == LOW) {
+        if(!isButtonHold) {
+            isButtonHold = true;
             mac_ring.dumpToSerial();
         }
+    } else {
+        isButtonHold = false;
     }
     delay(50);
 }
