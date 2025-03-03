@@ -25,13 +25,13 @@ static uint64_t nextScan;
 static uint64_t lastSTAConnect;
 static uint64_t lastSave;
 static bool isButtonHold;
-static UniqueMacRing mac_ring;
+static UniqueMacRing macRing;
 
 void onWifiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
     lastSTAConnect = millis();
     MacAddress addr;
     memcpy(addr.addr, info.wifi_ap_staconnected.mac, 6);
-    if(mac_ring.push(addr)) {
+    if (macRing.push(addr)) {
         auto str = macToString(addr.addr);
         log_i("New device connected: %s", str.c_str());
         digitalWrite(LED_PIN, HIGH);
@@ -41,6 +41,7 @@ void onWifiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
 }
 
 void initAP() {
+    log_i("Starting AP with SSID: %s", TARGET_SSID);
     WiFiClass::mode(WIFI_MODE_AP);
     if (!WiFi.softAP(TARGET_SSID)) {
         log_e("Failed to initialize softAP");
@@ -84,7 +85,7 @@ void postAddressToServer() {
 }
 
 void checkAvailablity() {
-    for (MacAddress *mac = nullptr; mac_ring.hasNext(); mac = mac_ring.pop()) {
+    for (MacAddress *mac = nullptr; macRing.hasNext(); mac = macRing.pop()) {
         if (mac == nullptr) continue;
         if (!isMacValid(mac->addr)) continue;
         log_i("Setting address to %s", macToString(mac->addr).c_str());
@@ -152,6 +153,7 @@ void setup() {
     log_i("Initializing wlan-spoof");
     pinMode(LED_PIN, OUTPUT);
     pinMode(BOOT_PIN, INPUT_PULLUP);
+    log_i("Post notify url: %s", POST_NOTIFY_URL);
     log_i("Initializing WiFi AP");
     WiFi.onEvent(onWifiEvent, ARDUINO_EVENT_WIFI_AP_STACONNECTED);
     initAP();
@@ -159,15 +161,20 @@ void setup() {
     lastSTAConnect = millis();
     lastSave = millis();
     isButtonHold = false;
-    Preferences prefs;
-    if (prefs.begin("wlan-spoof")) {
-        if(prefs.isKey("mac_dump")) {
-            log_i("Dumping last stored results:");
-            mac_ring.load(&prefs);
-            mac_ring.dumpToSerial();
+    if(touchRead(14) > 10) {
+        Preferences prefs;
+        if (prefs.begin("wlan-spoof")) {
+            if (prefs.isKey("mac_dump")) {
+                log_i("Dumping last stored results:");
+                macRing.load(&prefs);
+                macRing.dumpToSerial();
+            }
+            prefs.end();
         }
-        prefs.end();
     }
+#ifdef FILTER_RANDOM_MAC
+    log_i("Random mac filter has been enabled!");
+#endif
     log_i("wlan-spoof is successfully initialized!");
 }
 
@@ -184,16 +191,16 @@ void loop() {
                 log_e("Cannot initialize wlan-spoof pref storage. autosave failed.");
                 lastSave = UINT64_MAX;
             } else {
-                mac_ring.dump(&prefs);
-                mac_ring.dumpToSerial();
+                macRing.dump(&prefs);
+                //mac_ring.dumpToSerial();
             }
             prefs.end();
         }
     }
     if (digitalRead(BOOT_PIN) == LOW) {
-        if(!isButtonHold) {
+        if (!isButtonHold) {
             isButtonHold = true;
-            mac_ring.dumpToSerial();
+            macRing.dumpToSerial();
         }
     } else {
         isButtonHold = false;

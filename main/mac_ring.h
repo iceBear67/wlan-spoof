@@ -50,14 +50,20 @@ class UniqueMacRing {
     int current = 0;
     int macRingSize = 0;
     MacAddress addressRing[MAC_ADDRESS_RING_SIZE] = {};
-    BloomFilter bloom_filter = {};
+    BloomFilter bloomFilter = {};
     bool dirty = false;
   public:
     bool push(MacAddress address) {
-        if(!bloom_filter.contains(address.addr)) {
+#ifdef FILTER_RANDOM_MAC
+        uint8_t last = address.addr[0] & 0xF;
+        bool isRandom = last == 0x2 || last == 0xA ||
+               last == 0xE || last == 0x6;
+        if(isRandom) return false;
+#endif
+        if(!bloomFilter.contains(address.addr)) {
             addressRing[macRingSize % MAC_ADDRESS_RING_SIZE] = address;
             macRingSize++;
-            bloom_filter.insert(address.addr);
+            bloomFilter.insert(address.addr);
             dirty = true;
             return true;
         }
