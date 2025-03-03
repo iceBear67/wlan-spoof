@@ -97,6 +97,7 @@ void checkAvailablity() {
             continue;
         }
         postAddressToServer();
+        sleep(3);
     }
 }
 
